@@ -26,7 +26,7 @@ def plot_trips():
         t3 = [float(r["рейсов_3_секц"]) for r in data]
         ax.bar(days, t2, label="2-секционные")
         ax.bar(days, t3, bottom=t2, label="3-секционные")
-        ax.set_title(f"Стратегия: {strat}")
+        ax.set_title(f"Стратегия {strat}")
         ax.set_xlabel("день")
         ax.set_xticks(days)
         ax.grid(axis="y", linestyle="--", alpha=0.4)
