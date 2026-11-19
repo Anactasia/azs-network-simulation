@@ -1,4 +1,4 @@
-"""Построение графиков результатов моделирования для отчета."""
+"""Построение графиков результатов моделирования для отчета"""
 import csv
 import os
 
@@ -15,7 +15,7 @@ def read(name):
 
 
 def plot_trips():
-    """Рейсы бензовозов по дням: 2- и 3-секционные (столбики с накоплением)."""
+    """Рейсы бензовозов по дням"""
     rows = read("trips_by_day.csv")
     strategies = sorted({r["стратегия"] for r in rows})
     fig, axes = plt.subplots(1, len(strategies), figsize=(12, 4.5), sharey=True)
@@ -39,7 +39,7 @@ def plot_trips():
 
 
 def plot_share_and_revenue():
-    """Доля обслуженных клиентов и выручка по группам станций."""
+    """Доля обслуженных клиентов и выручка по группам станций"""
     rows = read("summary.csv")
     groups = ["АЗС", "ААЗС"]
     strategies = sorted({r["стратегия"] for r in rows})
