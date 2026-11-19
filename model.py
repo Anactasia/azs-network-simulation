@@ -1,144 +1,120 @@
-"""
-model.py - имитационная модель сети АЗС на SimPy.
-
-Устройство модели (процессы):
-  * client_generator  - порождает клиентов и распределяет их по станциям;
-  * client            - процесс одного клиента: очередь -> заправка -> уезжает;
-  * Station           - станция: баки, каналы обслуживания (ТРК), статистика,
-                        и "менеджер" (учёт прихода/расхода, выручка, заказ топлива);
-  * station_timer     - таймер менеджера для стратегии "по времени";
-  * Depot.dispatcher  - диспетчер нефтебазы: превращает заявки в рейсы;
-  * Depot.truck_trip  - один рейс бензовоза (2 или 3 секции).
+"""Имитационная модель сети АЗС на SimPy.
+Описывает процессы генерации клиентов, обслуживания на станциях,
+работы менеджеров и доставки топлива бензовозами с нефтебазы.
 """
 import random
 import simpy
 import config as C
 
 
-# ============================================================== станция ====
 class Station:
-    """АЗС или мини-АЗС. Одновременно выполняет роль менеджера станции."""
+    """Станция  с баками топлива и каналами обслуживания"""
 
     def __init__(self, env, depot, name, kind, capacity, channels, strategy):
         self.env = env
         self.depot = depot
         self.name = name
-        self.kind = kind                      # "АЗС" или "ААЗС"
-        self.cap = dict(capacity)             # ёмкость баков по видам топлива
+        self.kind = kind                      # АЗС или ААЗС
+        self.cap = dict(capacity)             # eмкость баков по видам топлива
         self.level = {f: c * C.INITIAL_LEVEL_SHARE for f, c in capacity.items()}
-        self.pending = {f: 0 for f in capacity}   # заказано секций, ещё не привезено
+        self.pending = {f: 0 for f in capacity}   # заказано секций в пути
         self.strategy = strategy
-        # каналы обслуживания: 4 ТРК x 2 авто = 8 (АЗС), 2 ТРК x 2 авто = 4 (ААЗС)
         self.channels = simpy.Resource(env, capacity=channels)
 
-        # --- статистика менеджера ---
-        self.total = 0                        # всего клиентов, приехавших сюда
-        self.served = 0                       # обслужено
-        self.lost_nofuel = 0                  # уехали: нет нужного топлива
-        self.lost_queue = 0                   # уехали: не дождались колонки
+        self.total = 0                        # всего прибывших клиентов
+        self.served = 0                       # успешно обслужено
+        self.lost_nofuel = 0                  # отказов из-за отсутствия топлива
+        self.lost_queue = 0                   # отказов из-за переполнения очереди
         self.revenue = 0.0                    # суммарная выручка, руб
-        self.litres_sold = {f: 0.0 for f in capacity}     # расход топлива
-        self.litres_received = {f: 0.0 for f in capacity}  # приход топлива
+        self.litres_sold = {f: 0.0 for f in capacity}
+        self.litres_received = {f: 0.0 for f in capacity}
 
-    # ---- заказ топлива (общая часть для обеих стратегий) ----
     def order_refill(self, fuel):
-        """Заказать целые секции, которые влезут в свободное место бака."""
+        """Заказ целых секций под свободный объем бака"""
         projected = self.level[fuel] + self.pending[fuel] * C.SECTION_VOLUME
         free = self.cap[fuel] - projected
-        n_sections = int(free // C.SECTION_VOLUME)    # секция сливается ПОЛНОСТЬЮ
+        n_sections = int(free // C.SECTION_VOLUME)  # секция бензовоза сливается только полностью
         if n_sections > 0:
             self.pending[fuel] += n_sections
             self.depot.add_order(self, fuel, n_sections)
 
-    # ---- стратегия 1: по критическому уровню ----
     def check_critical_level(self, fuel):
-        """Вызывается после каждой заправки: менеджер следит за уровнем."""
+        """Проверка порога остатка топлива для стратегии по критическому уровню"""
         if self.strategy != "level":
             return
         projected = self.level[fuel] + self.pending[fuel] * C.SECTION_VOLUME
         if projected <= C.CRITICAL_SHARE * self.cap[fuel]:
             self.order_refill(fuel)
 
-    # ---- приём топлива от бензовоза ----
     def receive(self, fuel, litres):
         self.level[fuel] += litres
         self.litres_received[fuel] += litres
         self.pending[fuel] -= 1
-        assert self.level[fuel] <= self.cap[fuel] + 1e-6, "перелив бака!"
+        assert self.level[fuel] <= self.cap[fuel] + 1e-6, "перелив бака"
 
 
-# ============================================================== клиент =====
 def client(env, st, fuel, volume):
-    """Процесс одного клиента на выбранной станции."""
+    """Процесс обслуживания клиента на выбранной станции"""
     st.total += 1
 
-    # 1) Клиент видит, что нужного топлива не хватает - сразу уезжает.
     if st.level[fuel] < volume:
         st.lost_nofuel += 1
         return
 
-    # 2) Ждёт свободный канал (колонку) не дольше MAX_WAIT минут.
     with st.channels.request() as req:
         result = yield req | env.timeout(C.MAX_WAIT)
         if req not in result:
             st.lost_queue += 1
             return
 
-        # 3) Пока стояли в очереди, топливо могли выбрать другие клиенты.
+        # проверка остатка топлива после ожидания в очереди
         if st.level[fuel] < volume:
             st.lost_nofuel += 1
             return
 
-        # 4) Заправка: топливо списывается сразу, занимаем канал на объём/скорость.
         st.level[fuel] -= volume
-        st.check_critical_level(fuel)         # менеджер проверяет уровень
+        st.check_critical_level(fuel)
         yield env.timeout(volume / C.FUELING_SPEED)
 
-        # 5) Учёт менеджера: выручка и расход.
         st.served += 1
-        money = volume * C.PRICE[fuel]
-        st.revenue += money
+        st.revenue += volume * C.PRICE[fuel]
         st.litres_sold[fuel] += volume
 
 
 def client_generator(env, rng, azs_list, mini_list):
-    """Единый поток клиентов (допущения 1 и 3) + правила распределения."""
+    """Генерация общего потока клиентов с распределением по станциям сети"""
     while True:
-        # интервал между клиентами сети = Random(3) / число ТРК
+        # интервал между приходами по всей сети: Random(3) / N_TRK
         yield env.timeout(rng.uniform(0, C.INTERVAL_MAX) / C.N_TRK)
 
-        fuel = rng.choice(C.FUELS)                           # тип топлива
-        volume = rng.uniform(C.VOLUME_MIN, C.VOLUME_MAX)     # Random(180)+20
+        fuel = rng.choice(C.FUELS)
+        volume = rng.uniform(C.VOLUME_MIN, C.VOLUME_MAX)
 
-        # Распределение клиентов по станциям (из условия):
         if fuel in ("98", "ДТ"):
-            group = azs_list                      # 1) 98 и ДТ - только на АЗС
+            group = azs_list
         elif rng.random() < C.SHARE_92_95_TO_AZS:
-            group = azs_list                      # 2) 92/95, Random(100) < 50
+            group = azs_list
         else:
-            group = mini_list                     # 3) 92/95, Random(100) >= 50
-        st = rng.choice(group)                    # конкретная станция в группе
+            group = mini_list
+        st = rng.choice(group)
         env.process(client(env, st, fuel, volume))
 
 
-# ======================================================= стратегия "время" ==
 def station_timer(env, rng, st):
-    """Менеджер станции по таймеру: раз в REFILL_PERIOD доливает баки."""
-    yield env.timeout(rng.uniform(0, C.REFILL_PERIOD))   # случайная фаза
+    """Таймер периодического пополнения запасов для стратегии по времени"""
+    yield env.timeout(rng.uniform(0, C.REFILL_PERIOD))   # случайный сдвиг начальной фазы
     while True:
         for fuel in st.cap:
             st.order_refill(fuel)
         yield env.timeout(C.REFILL_PERIOD)
 
 
-# ============================================================ нефтебаза ====
 class Depot:
-    """Нефтебаза: принимает заявки станций и отправляет бензовозы."""
+    """Агрегация заявок станций и отправка бензовозов"""
 
     def __init__(self, env):
         self.env = env
-        self.orders = []                       # заявки: (станция, топливо, секций)
-        # trips_by_day[день] = {2: число 2-секц. рейсов, 3: число 3-секц. рейсов}
+        self.orders = []
         self.trips_by_day = [{2: 0, 3: 0} for _ in range(C.SIM_DAYS)]
         self.sections_delivered = 0
         env.process(self.dispatcher())
@@ -147,33 +123,31 @@ class Depot:
         self.orders.append((station, fuel, n_sections))
 
     def dispatcher(self):
-        """Раз в DISPATCH_WINDOW минут комплектует рейсы из накопленных заявок."""
+        """Периодическая комплектация и отправка рейсов по накопленным заявкам"""
         while True:
             yield self.env.timeout(C.DISPATCH_WINDOW)
             if not self.orders:
                 continue
 
-            # Разворачиваем заявки в отдельные секции: (станция, топливо).
             sections = []
             for st, fuel, n in self.orders:
                 sections += [(st, fuel)] * n
             self.orders = []
 
-            # Самые "пустые" баки (меньше доля запаса) везём первыми.
+            # приоритет отгрузки отдается бакам с наименьшей относительной заполненностью
             sections.sort(key=lambda s: s[0].level[s[1]] / s[0].cap[s[1]])
 
-            # Режем на рейсы по 3 секции; остаток 1-2 секции - 2-секц. бензовоз.
+            # комплектация 3-секционных рейсов; неделимый остаток в 1-2 секции вывозится 2-секционным
             for i in range(0, len(sections), 3):
                 load = sections[i:i + 3]
                 self.env.process(self.truck_trip(load))
 
     def truck_trip(self, load):
-        """Один рейс: едем на станции маршрута и сливаем секции полностью."""
+        """Рейс бензовоза с последовательным сливом секций на станциях маршрута"""
         trip_type = 3 if len(load) == 3 else 2
         day = min(int(self.env.now // C.DAY), C.SIM_DAYS - 1)
-        self.trips_by_day[day][trip_type] += 1       # рейс считаем по дню отправки
+        self.trips_by_day[day][trip_type] += 1
 
-        # группируем секции по станциям (одна остановка на станцию)
         route = {}
         for st, fuel in load:
             route.setdefault(st, []).append(fuel)
@@ -187,11 +161,10 @@ class Depot:
                 self.sections_delivered += 1
 
 
-# ========================================================== запуск модели ===
 def run_simulation(strategy, seed):
-    """Один прогон на SIM_DAYS суток. Возвращает (станции, нефтебаза)."""
-    # Два независимых генератора случайных чисел: клиенты не зависят от стратегии,
-    # поэтому обе стратегии сравниваются на ОДИНАКОВЫХ потоках клиентов.
+    """Один прогон имитационной модели на SIM_DAYS суток"""
+    # раздельные генераторы случайных чисел обеспечивают одинаковый входной поток клиентов
+    # для корректного сравнительного анализа стратегий снабжения
     client_rng = random.Random(seed)
     timer_rng = random.Random(seed + C.TIMER_SEED_OFFSET)
     env = simpy.Environment()

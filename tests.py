@@ -1,7 +1,4 @@
-"""
-tests.py - простые проверки корректности модели. Запуск:  python tests.py
-(без pytest, только assert).
-"""
+"""Модульные тесты корректности имитационной модели"""
 import simpy
 
 import config as C
@@ -17,11 +14,11 @@ def make_station(strategy="level"):
 
 
 def test_order_refill_whole_sections_and_no_overflow():
-    """Заказываются только целые секции, и бак не переполнится."""
+    """Заказываются только целые секции, и бак не переполнится"""
     st, depot = make_station()
     st.level["92"] = 5000                       # бак 92 на 30000 л, свободно 25000
     st.order_refill("92")
-    assert st.pending["92"] == 4                # 4 секции = 24000 л (5-я не влезет)
+    assert st.pending["92"] == 4                # 4 секции = 24000 л
     assert st.level["92"] + st.pending["92"] * C.SECTION_VOLUME <= st.cap["92"]
     # повторный заказ при уже заказанном ничего не добавляет
     st.order_refill("92")
@@ -35,7 +32,7 @@ def test_order_refill_full_tank_orders_nothing():
 
 
 def test_critical_level_threshold():
-    """Заказ делается только при запасе <= 25 % ёмкости, и только один раз."""
+    """Заказ делается только при запасе <= 25 % емкости, и только один раз."""
     st, depot = make_station("level")
     st.level["95"] = 0.30 * st.cap["95"]        # выше порога - заказа нет
     st.check_critical_level("95")
@@ -67,14 +64,14 @@ def test_fuel_balance_and_levels_after_run():
                     assert -1e-6 <= st.level[fuel] <= cap + 1e-6
                     initial = cap * C.INITIAL_LEVEL_SHARE
                     diff = initial + st.litres_received[fuel] - st.level[fuel] - st.litres_sold[fuel]
-                    # расхождение - только заправки, не завершённые к концу суток
+                    # расхождение - только заправки, не завершенные к концу суток
                     assert -1e-6 <= diff <= C.VOLUME_MAX * C.CHANNELS_AZS
     finally:
         C.SIM_DAYS = old_days
 
 
 def test_same_clients_for_both_strategies():
-    """Клиентский поток не зависит от стратегии (раздельные ГСЧ)."""
+    """Клиентский поток не зависит от стратегии"""
     old_days = C.SIM_DAYS
     C.SIM_DAYS = 1
     try:
