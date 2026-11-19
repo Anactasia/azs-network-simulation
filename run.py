@@ -74,7 +74,7 @@ def main():
             print(f"  [{title}] прогон {r + 1}/{C.N_RUNS} готов за {time.time() - t0:.1f} с")
         all_results[strategy] = runs
 
-    # Вывод сводных результатов в консоль
+    # вывод сводных результатов в консоль
     for strategy, title in C.STRATEGIES.items():
         runs = all_results[strategy]
         print("\n" + "=" * 78)
@@ -101,8 +101,8 @@ def main():
             t3 = mean(r["trips"][d][3] for r in runs)
             print(f"{d + 1:>5}{t2:>9.1f}{t3:>9.1f}{t2 + t3:>8.1f}")
 
-    # Сохранение результатов в формате CSV
-    # Итоги по группам станций
+    # сохранение результатов в формате CSV
+    # итоги по группам станций
     with open(os.path.join(OUT, "summary.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["стратегия", "группа", "клиентов", "обслужено", "доля_обслуженных",
@@ -118,7 +118,7 @@ def main():
                             round(g("revenue")[0]), round(g("revenue")[1]),
                             round(g("litres")[0])])
 
-    # Статистика рейсов бензовозов по дням
+    # статистика рейсов бензовозов по дням
     with open(os.path.join(OUT, "trips_by_day.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["стратегия", "день", "рейсов_2_секц", "рейсов_3_секц", "всего"])
@@ -129,7 +129,7 @@ def main():
                 t3 = mean(r["trips"][d][3] for r in runs)
                 w.writerow([title, d + 1, round(t2, 1), round(t3, 1), round(t2 + t3, 1)])
 
-    # Детальная статистика по отдельным станциям
+    # детальная статистика по отдельным станциям
     with open(os.path.join(OUT, "stations.csv"), "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(["стратегия", "станция", "клиентов", "обслужено", "доля", "выручка_руб"])

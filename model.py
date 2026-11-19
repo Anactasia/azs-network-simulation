@@ -84,7 +84,7 @@ def client(env, st, fuel, volume):
 def client_generator(env, rng, azs_list, mini_list):
     """Генерация общего потока клиентов с распределением по станциям сети"""
     while True:
-        # Интервал между приходами по всей сети: Random(3) / N_TRK
+        # интервал между приходами по всей сети: Random(3) / N_TRK
         yield env.timeout(rng.uniform(0, C.INTERVAL_MAX) / C.N_TRK)
 
         fuel = rng.choice(C.FUELS)
