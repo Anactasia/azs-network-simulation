@@ -1,12 +1,9 @@
-"""
-plots.py - графики для отчёта. Запускать ПОСЛЕ run.py:  python plots.py
-Читает results/*.csv и сохраняет картинки в results/*.png
-"""
+"""Построение графиков результатов моделирования для отчета."""
 import csv
 import os
 
 import matplotlib
-matplotlib.use("Agg")          # рисуем в файл, без окна
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
@@ -32,6 +29,8 @@ def plot_trips():
         ax.set_title(f"Стратегия: {strat}")
         ax.set_xlabel("день")
         ax.set_xticks(days)
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        ax.set_axisbelow(True)
     axes[0].set_ylabel("число рейсов")
     axes[0].legend()
     fig.tight_layout()
@@ -40,7 +39,7 @@ def plot_trips():
 
 
 def plot_share_and_revenue():
-    """Доля обслуженных и выручка: АЗС vs ААЗС, две стратегии рядом."""
+    """Доля обслуженных клиентов и выручка по группам станций."""
     rows = read("summary.csv")
     groups = ["АЗС", "ААЗС"]
     strategies = sorted({r["стратегия"] for r in rows})
@@ -49,16 +48,26 @@ def plot_share_and_revenue():
     for i, strat in enumerate(strategies):
         sel = {r["группа"]: r for r in rows if r["стратегия"] == strat}
         x = [g + i * width for g in range(len(groups))]
-        a1.bar(x, [float(sel[g]["доля_обслуженных"]) * 100 for g in groups],
-               width, label=strat)
-        a2.bar(x, [float(sel[g]["выручка_руб"]) / 1e6 for g in groups],
-               width, label=strat)
+        share_vals = [float(sel[g]["доля_обслуженных"]) * 100 for g in groups]
+        rev_vals = [float(sel[g]["выручка_руб"]) / 1e6 for g in groups]
+        b1 = a1.bar(x, share_vals, width, label=strat)
+        b2 = a2.bar(x, rev_vals, width, label=strat)
+        a1.bar_label(b1, fmt="%.1f%%", padding=3, fontsize=9)
+        a2.bar_label(b2, fmt="%.1f", padding=3, fontsize=9)
+
+    max_rev = max(float(r["выручка_руб"]) / 1e6 for r in rows)
+    a1.set_ylim(0, 115)
+    a2.set_ylim(0, max_rev * 1.15)
+
     for ax, title, yl in ((a1, "Доля обслуженных клиентов", "%"),
                           (a2, "Выручка за 10 суток", "млн руб")):
         ax.set_xticks([g + width / 2 for g in range(len(groups))])
         ax.set_xticklabels(groups)
         ax.set_title(title)
         ax.set_ylabel(yl)
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        ax.set_axisbelow(True)
+
     a1.legend()
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "share_and_revenue.png"), dpi=150)
