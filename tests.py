@@ -32,7 +32,7 @@ def test_order_refill_full_tank_orders_nothing():
 
 
 def test_critical_level_threshold():
-    """Заказ делается только при запасе <= 25 % ёмкости, и только один раз."""
+    """Заказ делается только при запасе <= 25 % емкости, и только один раз."""
     st, depot = make_station("level")
     st.level["95"] = 0.30 * st.cap["95"]        # выше порога - заказа нет
     st.check_critical_level("95")
